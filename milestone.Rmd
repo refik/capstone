@@ -1,0 +1,94 @@
+---
+title: "Corpora Exploratory Analysis"
+author: "Refik Türkeli"
+date: "12/8/2017"
+output:
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+source("explore.R")
+max_line <- -1
+```
+
+## Project
+
+Using mobile devices keyboards for inputting text to communicate or interact 
+with applications takes significant time of device usage in daily life. The 
+increase in processing power of mobile devices and advancements in artificial 
+intelligence enables an opportunity for increasing the efficiancy of this 
+process.
+
+This project is about predictive text entry. I will create a prototype web
+application using Shiny framework that will receive a stream of words by the 
+user that is in the typing process and the application will try to predict
+the next word that is intended to be written and show it as a couple of options
+to the user. If one of the predictions is accurate, the user will select it. 
+
+Accurate predictions will mean less time wasted on typing for the users. 
+
+## Method
+
+To predict the users next input, I will build a model that is trained by
+text written previously by other people. This training will engrain the patterns
+of text sequences into the model and enable it to generate predictions on a 
+fresh stream of word input. 
+
+The text to train the model with has to be ideally diverse to make the model
+more successful in unique situations. Large sets of text data used for 
+statistical analysis purposes are called *corpora*. 
+
+## Corpora
+
+The corpora that I will use for this project has text from `r length(language)` 
+different languages and are obtained from `r length(type)` different contexts. 
+I will highlight the features of the dataset with some data tables and figures.
+
+
+#### Basic Statistics
+
+There appears to be a balance for the amount of words available from each 
+document type within a language. It is also not suprising to see that twitter
+has the least words per line because of the 140 character limit. As a language,
+English dominates the corpora considering the volume of text.
+
+```{r, echo=FALSE, message=FALSE}
+basic_stat_all(max_line = max_line) %>%
+  basic_stat_kable()
+```
+
+#### Word Distribution for Documents
+
+In the plot below we can see that news have a gaussian distribution accross
+different languages. Meaning there is an avarage number of words for news 
+which occurs most likely and as word count moves away from that average (more/less) 
+there is less of them. It can be said that there is no distinctive 
+characteristic for the amount of words in a news document and that its mostly random.
+
+Blogs are different then news. Shortests blog documents occur most frequently
+and increasing word count means less frequent occurance. My understanding is 
+that people try to write shorter blog posts.
+
+```{r, echo=FALSE, message=FALSE, fig.align='center'}
+word_count_all(max_line = max_line) %>%
+  word_count_ggplot()
+```
+
+#### Most Frequent Words
+
+I also analyzed the most frequent words in the corpora. Only English documents
+are inspected for this purpose. Words like "the", "and" is filtered out.
+
+It is interesting to see that top 3 words are same for 3 different types of 
+documents. Twitter documents top 10 words have higher relative frequency
+than the other two types of documents. 
+
+News have more serious words like "percent", "million" and "school" while
+blogs have more lifestyle words like "world", "book" and "home". Twitters top 
+words are more casual like "lol", "happy" and "night".
+
+```{r, echo=FALSE, message=FALSE, fig.align='center'}
+frequent_word_en(max_line = max_line) %>% 
+  frequent_word_ggplot()
+```
