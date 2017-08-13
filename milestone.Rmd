@@ -12,6 +12,8 @@ source("explore.R")
 max_line <- -1
 ```
 
+Source code for this document is available here: http://github.com/refik/capstone
+
 ## Project
 
 Using mobile devices keyboards for inputting text to communicate or interact 
@@ -66,9 +68,9 @@ which occurs most likely and as word count moves away from that average (more/le
 there is less of them. It can be said that there is no distinctive 
 characteristic for the amount of words in a news document and that its mostly random.
 
-Blogs are different then news. Shortests blog documents occur most frequently
+Blogs are different than news. Shortests blog documents occur most frequently
 and increasing word count means less frequent occurance. My understanding is 
-that people try to write shorter blog posts.
+that people tend to write shorter blog posts.
 
 ```{r, echo=FALSE, message=FALSE, fig.align='center'}
 word_count_all(max_line = max_line) %>%
@@ -78,11 +80,12 @@ word_count_all(max_line = max_line) %>%
 #### Most Frequent Words
 
 I also analyzed the most frequent words in the corpora. Only English documents
-are inspected for this purpose. Words like "the", "and" is filtered out.
+are inspected for this purpose. Words like "the", "and" and "of" (stop words)
+are filtered out.
 
-It is interesting to see that top 3 words are same for 3 different types of 
-documents. Twitter documents top 10 words have higher relative frequency
-than the other two types of documents. 
+Since the language is common, there are common words in the top 10 like "time",
+"day" and "people". Twitter documents top 10 words have higher relative 
+frequency than the other two types of documents. 
 
 News have more serious words like "percent", "million" and "school" while
 blogs have more lifestyle words like "world", "book" and "home". Twitters top 
@@ -92,3 +95,4 @@ words are more casual like "lol", "happy" and "night".
 frequent_word_en(max_line = max_line) %>% 
   frequent_word_ggplot()
 ```
+
