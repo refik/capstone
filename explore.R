@@ -11,9 +11,16 @@ library(tm)
 
 set.seed(2017)
 
-corpora_zip <- "Coursera-SwiftKey.zip"
+corpora_url <- "https://d396qusza40orc.cloudfront.net/dsscapstone/dataset/Coursera-SwiftKey.zip"
+corpora_zip <- basename(corpora_url)
 corpora_folder <- tools::file_path_sans_ext(corpora_zip)
-cache_fs <- cache_filesystem(glue("{corpora_folder}.cache"))
+cache_dir <- glue("{corpora_folder}.cache")
+cache_fs <- cache_filesystem(cache_dir)
+
+if (!file.exists(corpora_zip)) {
+  message("Downloading corpora zip...")
+  download.file(corpora_url, corpora_zip)
+}
 
 if (!dir.exists(corpora_folder)) {
   message("Unzipping corpora...")
