@@ -2,132 +2,132 @@ library(tidyverse)
 library(tidytext)
 library(stringr)
 library(RSQLite)
-library(edgeR)
 library(glue)
+library(digest)
+library(data.table)
 
 source("chunking.R")
-set.seed(2017)
+source("initialize.R")
+source("kneser_ney.R")
 
-corpora_url <- paste0("https://d396qusza40orc.cloudfront.net", 
-                      "/dsscapstone/dataset/Coursera-SwiftKey.zip")
-corpora_zip <- basename(corpora_url)
-corpora_folder <- tools::file_path_sans_ext(corpora_zip)
-corpora_db_path <- glue("{corpora_folder}.sqlite")
-corpora_db_path_optimized <- glue("{corpora_folder}.optimized.sqlite")
-corpora_db <- DBI::dbConnect(RSQLite::SQLite(), corpora_db_path)
-corpora_db_optimized <- DBI::dbConnect(RSQLite::SQLite(), corpora_db_path_optimized)
-
-log <- function(.data = NULL, msg) {
-  time <- format(Sys.time(), "%X")
-  message(glue("{time} | {msg}"))
-  .data
-}
-
-if (!file.exists(corpora_zip)) {
-  log(msg = "Downloading corpora zip")
-  download.file(corpora_url, corpora_zip)
-}
-
-if (!dir.exists(corpora_folder)) {
-  log(msg = "Unzipping corpora")
-  unzip(corpora_zip, exdir = corpora_folder)
-  message(glue("Corpora unzipped in \"{corpora_folder}\" folder."))
-}
-
-languages <- c("en-US", "de-DE", "ru-RU", "fi-FI")
-types <- c("twitter", "blogs", "news")
-
-get_path <- function(language, type) {
-  language_file <- str_replace(language, "-", "_")
-  paste(language_file, type, "txt", sep = ".") %>% 
-    file.path(corpora_folder, "final", language_file, .)
-}
-
-get_text <- function(language, type, n_max = 500) {
-  log(msg = glue("Reading text {language} {type}"))
-  read_lines(get_path(language, type), n_max = n_max) %>% 
-    tibble(language = language, type = type, text = .) %>% 
-    mutate(line = row_number())
-}
-
-corpora_write_db <- function(language = rep("en-US", length(types)), 
+write_corpora_text <- function(language = rep("en-US", length(types)), 
                              type = types, ...) {
-  map2(language, type, function(language, type) {
-    get_text(language, type, ...) %>% 
-      log(glue("Writing text {language} {type}")) %>% 
-      chunk_apply(function(chunk) {
-        dbWriteTable(corpora_db$con, "corpora", chunk, 
-                     append = T, row.names = F)
-      }, chunk_size = 10000)
-  }) %>% 
-    invisible()
+  map2_df(language, type, ~ get_text(.x, .y, ...)) %>% 
+    mutate(text_number = row_number()) %>% 
+    log(glue("Writing corpora text to db")) %>% 
+    dbWriteTable(corpora_db, "corpora", .)
 }
 
-corpora_ngram_write_db <- function(ngram_n = 1:6) {
-  lng_typ <- corpora_db %>%
-    tbl("corpora") %>% 
-    count(language, type) %>% 
-    collect()
+write_ngram_raw <- function(ngram_n_max = 6) {
+  log(msg = "Writing raw ngrams")
   
-  ngram_count <- length(ngram_n)
+  corpora <- tbl(corpora_db, "corpora") %>% 
+    select(text_number, text)
+    
+  if ("ngram_raw" %in% dbListTables(corpora_db)) {
+    last_processed <- tbl(corpora_db, "ngram_raw") %>% 
+      summarise(max(text_number)) %>%
+      pull(1)
+    
+    total <- corpora %>% count() %>% pull(1)
+    progress <- (last_processed * 100) %/% total
+    log(msg = glue("Resuming from {progress} %"))
+    
+    corpora <- filter(corpora, text_number > last_processed)
+  }
   
-  map2(lng_typ$language, lng_typ$type, function(language, type) {
-    corpora_db %>% 
-      tbl("corpora") %>% 
-      filter(language == !!language, type == !!type) %>% 
-      arrange(line) %>% 
-      log(glue("Tokenizing {language} {type} to {ngram_count} kinds of ngrams")) %>% 
-      chunk_apply(chunk_size = 5000, fn = function(chunk) {
-        ngram_n %>% 
-          map_df(function(n) {
-            chunk %>% 
-              unnest_tokens(ngram, text, "ngrams", n = n) %>% 
-              mutate(n = n)
-          }) %>% 
-          dbWriteTable(corpora_db$con, "ngram_raw", ., 
-                       append = T, row.names = F)
-      })
-  }) %>% 
-    invisible()
-}
-
-corpora_write_distinct_ngram <- function() {
-  # Creating schema
-  # dbWriteTable(corpora_db$con, "ngram_frequency", tibble(ngram = character(), n = integer(), r = integer()), row.names = F)
-  log(msg = "Counting distinct ngrams")
-  dbSendQuery(
-    corpora_db$con,
-    "INSERT INTO `ngram_frequency` (`ngram`, `n`, `r`)
-     SELECT `ngram`, `n`, COUNT() AS `r`
-     FROM `ngram_raw`
-     GROUP BY `ngram`, `n`"
-  )
-  log(msg = "Writing distinct ngrams to db completed")
-}
-
-corpora_write_ngram_optimized <- function() {
-  log(msg = "Writing optimized ngram to db")
-  
-  smooth <- corpora_db %>% 
-    tbl("ngram_goodturing") %>% 
-    select(n, r, r_star) %>% 
-    collect()
-  
-  corpora_db %>%
-    tbl("ngram_frequency") %>% 
-    chunk_apply_lazy(function(chunk) {
-      smoothed <- chunk %>% 
+  corpora %>% 
+    chunk_apply_lazy(chunk_size = 10000, fn = function(chunk) {
+      sentence_df <- chunk %>% 
         collect() %>% 
-        left_join(smooth, by = c("n", "r")) %>% 
-        mutate(ngram = ifelse(n == 1, paste0(" ", ngram), ngram)) %>% 
-        separate(ngram, c("tail", "head"), " (?=[^ ]*$)") %>% 
-        select(n, tail, head, r_star)
+        unnest_tokens(sentence, text, token = "sentences") %>% 
+        filter(!str_detect(sentence, "_")) %>% 
+        filter(!str_detect(sentence, "[^\\u0000-\\u007F]+")) %>% 
+        mutate(sentence_number = row_number()) %>% 
+        unnest_tokens(word, sentence, token = "words") %>% 
+        mutate(has_number = str_detect(word, "\\d")) %>% 
+        mutate(word = ifelse(has_number, "__numbers__", word)) %>% 
+        group_by(text_number, sentence_number) %>% 
+        filter(filter_out_consecutive_number(has_number)) %>% 
+        select(-has_number) %>% 
+        summarise(sentence = paste(c("__sentence__", word), collapse = " ")) %>% 
+        group_by(text_number) %>% 
+        summarise(text = paste(c("__text__", sentence), collapse = " ")) %>% 
+        ungroup() 
       
-      dbWriteTable(corpora_db_optimized$con, "ngram_smooth", smoothed, append = T,
-                   row.names = F, field.types = c("n" = "INTEGER", "tail" = "VARCHAR(255)",
-                                                  "head" = "VARCHAR(255)", "r_star" = "REAL"))
-    }, chunk_size = 100000)
-  
-  log(msg = "Writing optimized ngram to db completed")
+      ngrams <- map_df(1:ngram_n_max, ~ {
+        sentence_df %>% 
+          unnest_tokens(ngram, text, "ngrams", n = .x) %>% 
+          mutate(ngram_n = .x) 
+      })
+      
+      ngrams %>% 
+        select(ngram, ngram_n) %>% 
+        dbWriteTable(corpora_db, "ngram_raw", ., append = T)
+    }) %>% 
+    invisible()
 }
 
+write_ngram <- function() {
+  log(msg = "Writing unique keys")
+  db_create_table(corpora_db, "ngram", 
+                  c("ngram_n" = "INTEGER", "ngram_count" = "INTEGER", 
+                    "ngram" = "TEXT"))
+  
+  dbSendQuery(corpora_db, "
+    INSERT INTO `ngram` (`ngram_n`, `ngram_count`, `ngram`)
+    SELECT `ngram_n`, COUNT() AS `ngram_count`, `ngram`
+    FROM `ngram_raw`
+    GROUP BY `ngram`, `ngram_n`
+")
+}
+
+write_ngram_key <- function() {
+  log(msg = "Writing ngram keys")
+  tbl(corpora_db, "ngram") %>% 
+    filter(ngram_count != 1) %>% 
+    chunk_apply_lazy(chunk_size = 10000, function(chunk) {
+      collect(chunk) %>% 
+        mutate(space = gregexpr(" ", ngram)) %>% 
+        mutate(keys = map2_chr(ngram, space, function(full, space_pos) {
+          if (space_pos[1] == -1) {
+            "||"
+          } else {
+            first <- head(space_pos, 1)
+            last <- tail(space_pos, 1)
+            paste(
+              substr(full, 1, last - 1),
+              substr(full, first + 1, last - 1),
+              substr(full, first + 1, 1000000L)
+              , sep = "|")
+          }
+        })) %>% 
+        separate(keys, c("except_last_word", "middle", "except_first_word"), "\\|") %>% 
+        select(-space) %>% 
+        dbWriteTable(corpora_db, "ngram_key", ., append = TRUE)
+    }) %>% 
+    invisible()
+}
+
+ngram_key_index <- function() {
+  log(msg = "Making index for ngram_key")
+  list("ngram_count", c("ngram_n", "ngram_count"),
+       "except_last_word", "middle", "except_first_word", "ngram") %>% 
+    map(~ db_create_index(corpora_db, "ngram_key", .))
+  log(msg = "Index completed")
+}
+
+prepare_all <- function(n_max = 100000) {
+  start <- Sys.time()
+  log(msg = "Preparing Pmkn for corpur")
+  write_corpora_text(n_max = n_max, sampled = TRUE)
+  write_ngram_raw()
+  write_ngram()
+  write_ngram_key()
+  ngram_key_index()
+  modified_discount(write = T)
+  kneser_ney_full()
+  kneser_compact_ngram()
+  duration <- as.integer(difftime(Sys.time(), start, units = "mins"))
+  log(msg = glue("Completed. Took {duration} minutes."))
+}

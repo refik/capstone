@@ -47,10 +47,17 @@ get_path <- function(language, type) {
     file.path(corpora_folder, "final", language_file, .)
 }
 
-get_text <- function(language, type, max_line = 500) {
+get_text <- function(language, type, max_line = 500, sampled = FALSE) {
   log("Reading text")
-  read_lines(get_path(language, type), n_max = max_line) %>% 
-    tibble(language = language, type = type, text = .) %>% 
+  
+  if (sampled == TRUE) {
+  lines <- read_lines(get_path(language, type), n_max = -1) %>% 
+    sample(max_line)
+  } else {
+    lines <- read_lines(get_path(language, type), n_max = max_line) 
+  }
+  
+  tibble(language = language, type = type, text = lines) %>% 
     mutate(line_num = row_number())
 }
 
