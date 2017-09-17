@@ -1,0 +1,65 @@
+Next Word Prediction Application
+========================================================
+author: Refik Türkeli
+date: 16/09/2017
+width: 1440
+height: 900
+
+https://refik.shinyapps.io/next_word_prediction/
+
+The Product
+========================================================
+
+- The product that will be described in this presentation is a
+prototype for a next word prediction application written with
+shiny framwork.
+- The application receives text input from the user and generates
+a prediction for the next word that the user might intend to write. 
+- Real world use for this concept is most rewarding as a 
+smartphone keyboard application where people's efficiency for
+text entry is less efficient.
+
+Shiny Application
+========================================================
+
+- Shiny application provides a text input and a select input to the user.
+- User has to enter the sentences on the text input. As the text is entered,
+the application simultaneously searches for a next word prection that is mosty
+likely to be entered next given the input data. 
+- When the text input is updated, predictions reccomended by the application is
+listed on a select box. User sees the predictions on the select box ordered
+by the confidence level from highest to lowest. 
+- The user can approve a prediction as the next word by selecting it from the select
+box. After a prediction is selected, it is automatically appended to the text input.
+After the text input is updated, a new set of predictions is presented to the user.
+
+Pre-Processing Text
+========================================================
+
+- 20% of corpora provided for the capstone project is used. Up to 6 n-grams are generated. Sentences are prepended with a position identifier to improve the
+prediction accuracy on the start of sentences.
+- To decrease the sparsity of data and increase the efficiency of computation resources used, n-grams occuring only once are filtered out. 
+- Some common patterns create different
+n-grams because they include numbers and numbers are variable. To eliminate this,
+all numbers seen in the text is replaced with a common number identifier.
+- N-grams Wi-1,i-n+1 (except last word) are hashed using xxhash64 algorithm to 
+decrease storage requirement and speed up the lookup process for the algorithm.
+All of the data is written to SQLite to decrease the RAM requirement on 
+pre processing the data. N-grams were processed in chunks.
+
+The Algorithm
+========================================================
+
+- N-gram counts are not the best method for calculating their probabilities.
+A smoothing method imrproves accuracy by accounting for n-grams that are not observed
+in the sample text. 
+- The most successful smooting method known is "Modified Kneser-Ney" and it is the
+algorithm that is used in the product. The intuition behind Kneser-Ney is that for 
+a given n-gram, it checks the higher order n-gram counts that includes the given n-gram 
+and takes into account how much distinctness it explains. 
+As an example, if the text has "San Francisco" as a bigram many times, it will have
+a high count for "Francisco". When predicting the next word, if only the count is used,
+Francisco might be predicted. Kneser-Ney avoids this by taking into account that "Francisco" only appears after "San".
+- The modified part comes from a method of better estimating discount parameters
+to take into account the n-grams that are not part of the data.
+On the next word lookup, first the highest order n-gram is searched from the database. If its not found, then the algorithm backs off to the lower order.
